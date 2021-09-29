@@ -18,19 +18,17 @@ class StructuredLogMessage(object):
     def __str__(self):
         return json.dumps(self.kwargs)
 
-m = StructuredLogMessage   # optional, to improve readability
 
-logging.basicConfig(level=logging.INFO, format='%(message)s')
 
 # These values should be set in the environment variables
-token = os.environ['GITHUB_TOKEN'] #"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"
-actor = os.environ['GITHUB_ACTOR']
+token       = os.environ['GITHUB_TOKEN'] #"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"
+actor       = os.environ['GITHUB_ACTOR']
 workflow_name = os.environ['WORKFLOW_NAME'] # pull request workflow
-#job_name = 'secret_check' # The job name
-job_name = os.environ['JOB_NAME']
-step_name = os.environ['STEP_NAME'] # The step name that contains the secrets check
+job_name    = os.environ['JOB_NAME']
+step_name   = os.environ['STEP_NAME'] # The step name that contains the secrets check
 trigger_string = os.environ['TRIGGER_STRING'] # The trigger string
-log_zip = os.environ['LOG_ZIP']
+log_zip     = os.environ['LOG_ZIP']
+git_repo    = os.environ['GITHUB_REPO']
 
 def get_logs(url):
     headers = {
@@ -41,9 +39,9 @@ def get_logs(url):
     logs_url = r.url # 'https://media.readthedocs.org/pdf/django/latest/django.pdf'
     with open(log_zip, 'wb') as f:
         f.write(r.content)
-    #print("Stored log in", log_zip)
+    #logging.info(m("Stored log in", log_zip))
 
-def zip_find_trigger():
+def zip_find_trigger(m):
     p = Path(log_zip)
     logpath = ''
     for path in p.iterdir():
@@ -58,60 +56,85 @@ def zip_find_trigger():
             break
     if not logpath:
         raise FileNotFoundError
-    print('\nChecking logs for trigger string...', end='')
+    logging.info(m(msg='Checking logs for trigger string...', query=trigger_string))
     with ZipFile(log_zip) as zf:
         with io.TextIOWrapper(zf.open(logpath), encoding="utf-8") as f:
+            ln = 0
             for line in f:
+                ln += 1
                 if re.search(re.escape(trigger_string) + "$", line):
-                    print('FOUND')
-                    print('Logfile:', logpath)
-                    print('▸', line)
+                    logging.info(m(msg="Found trigger", 
+                                    log_file=logpath, 
+                                    log_line_number=ln, 
+                                    log_line=line.strip()))
                     return True #Trigger found
-            print("NOT FOUND")
+                
+            logging.info(m("Trigger not found."))
             return False
 
 def get_workflow(repo):
-    print("Searching workflows...", end=' ')
     workflows = repo.get_workflows()
     for wf in workflows:
         if workflow_name in wf.name:
             workflow = repo.get_workflow(wf.id)
-            print("SUCCESS")
-            print("Workflow id", workflow.id, ":", workflow.name)
             return workflow
-    print("FAIL") 
     return None
+
+def setup_logger():
+    root = logging.getLogger()
+    if root.handlers:
+        for handler in root.handlers:
+            root.removeHandler(handler)
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
+
 
 def lambda_handler(event=None, context=None):
     # Create a github object using an access token
     g = Github(token)
+    m = StructuredLogMessage   # to improve readability
+    setup_logger()
 
     # Access a specific repo
-    repo = g.get_repo('trussworks/dependabot_security_test')
-    print("Repo: ", repo.name)
-
+    repo = g.get_repo(git_repo)
+    if not repo:
+        logging.error(m(msg="Repo not found", name=git_repo))
+        exit(1)
+    logging.info(m(msg="Using Repo", name=repo.name))
+    print("Using repo", repo.name)
+    # Find the correct workflow
+    logging.info(m(msg="Searching workflows...", query=workflow_name))
     workflow = get_workflow(repo)
     if not workflow:
+        logging.error(m(msg="Workflow not found", name=git_repo))
         exit(1)
+    logging.info(m(msg="Workflow found.", workflow_id=workflow.id,
+                                            workflow_name=workflow.name))
 
-    print("\nSearching for failed runs by", actor, "...")
+    # Search for failed runs by dependabot
+    logging.info(m(msg="Searching for failed runs", query=actor))
     message = ""
     for run in workflow.get_runs(actor=actor):
         if run.conclusion == 'failure':
-            print('-------------------')
-            print("▸", run.head_commit.message.split('\n')[0])
-            print("Run id", run.id, "triggered by", actor)
-            print("Commit:", run.head_sha[0:7])
+            logging.info(m( msg="Failed run found", 
+                            commit_title=run.head_commit.message.split('\n')[0],
+                            workflow_id=workflow.id,
+                            workflow_name=workflow.name,
+                            run_id=run.id,
+                            git_actor=actor,
+                            commit_sha=run.head_sha[0:7],
+                            run_created_at=str(run.created_at))
+                            ) 
             message = run.head_commit.message
-            print("Created at:", run.created_at)
 
+            # Download the run logs
             get_logs(run.logs_url)
             
-            if zip_find_trigger():
-                print('Rerunning workflow')
+            # If trigger is found, rerun the workflow
+            if zip_find_trigger(m):
+                logging.info(m(msg='Rerunning workflow',
+                            workflow_id=workflow.id,
+                            workflow_name=workflow.name))
                 #result = run.rerun()
-        else:
-            print(run.id, run.head_commit.message.split('\n')[0], " >>", run.conclusion)
     return {
         'statusCode': 200,
         'body': json.dumps(message)
