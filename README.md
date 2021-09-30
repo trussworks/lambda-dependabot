@@ -8,6 +8,8 @@ It's meant to relieve the issue discussed in this link, until Github provides a 
 
 ## How It Works
 
+![How it works](images/overview.png?raw=true "How It Works")
+
 When dependabot creates a PR, it will often fail the unit tests because the workflow cannot access secrets. A retry of the workflow by a user with permissions will allow the tests to pass.
 
 The AWS lambda function runs every hour and checks the repo for such failed PRs. It detects a special string in the logs of the failed workflows and triggers a rerun. It outputs logs to CloudWatch for debug purposes.
@@ -49,7 +51,7 @@ jobs:
         shell: bash
 ```
 
-Note down the following which will be needed to configure the action.
+Note down the following from your workflow, which will be needed to configure the lamdba function.
 
 ```
 Workflow Name: "Pull Request Workflow"
@@ -71,9 +73,13 @@ Next, create an AWS Lambda function that will check the repo for failed runs and
 
     Instructions: <https://docs.aws.amazon.com/lambda/latest/dg/lambda-intro-execution-role.html>
 
+    ![Create Role](images/lambda-role.png?raw=true "Lambda Role")
+
 2. Create a lambda layer to allow use of the PyGithub package
 
    Go to Lambda > Layers > Create Layer
+
+   ![Create Layer](images/create-layer.png?raw=true "Create Layer")
 
    Fill the the following info:
 
