@@ -60,8 +60,7 @@ Step Name: "Check secrets"
 Trigger String: "SECRETS MISSING"
 ```
 
-You should also create one access token with permissions to access this repo.
-(Is there a way to make one per repo, vs per person??)
+You should also create one access token with permissions to access this repo. This is probably best done by creating a single "Bot" user with access to only this repo and then creating a personal access token for your bot.
 
 ### Create an AWS Lambda function to monitor your repo
 
@@ -114,10 +113,15 @@ Next, create an AWS Lambda function that will check the repo for failed runs and
     GITHUB_REPO     Your repo name with org prefix
     GITHUB_TOKEN    The access token for the repo
     WORKFLOW_NAME   Workflow name
-    JOB_NAME     Job name
-    STEP_NAME     Step name
+    JOB_NAME        Job name
+    STEP_NAME       Step name
     TRIGGER_STRING  Trigger string
     LOG_ZIP         Tmp zip filename, must be in /tmp
+    GITHUB_PULL_LABEL Label to add to the PR on retry. 
+                    Leave blank if you don't want a label
+    GITHUB_ENABLE_COMMENT Set to true to leave a comment on the PR
+    DRY_RUN         If this is set to true, the actual retry will not happen, 
+                    but everything else, including comments, will.
     ```
 
     Here's an example
@@ -134,6 +138,8 @@ Next, create an AWS Lambda function that will check the repo for failed runs and
     ```
 
 5. At this point you should be able to test the lambda function.
+
+    If you enable `DRY_RUN` in the environment variables, the actual rerun will not occur, although comments and labels will. This allows you to test most of the flow without the retry which cannot be 'undone'.
 
     Go back to the Code editor. Hit `Deploy` and after it has deployed, hit `Test`.
 
@@ -165,3 +171,9 @@ Next, create an AWS Lambda function that will check the repo for failed runs and
     ```
 
 ### Create an AWS CloudWatch Event to trigger the lambda function on a schedule
+
+Finally you want to create a CloudWatch Event to trigger the function.
+
+You can follow these instructions here: <https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-run-lambda-schedule.html>
+
+For your target, choose the lambda function you created above.
