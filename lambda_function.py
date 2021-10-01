@@ -21,7 +21,7 @@ class StructuredLogMessage(object):
 
 
 # These values should be set in the environment variables
-token       = os.environ['GITHUB_TOKEN'] #"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"
+token       = os.environ['GITHUB_TOKEN'] 
 actor       = os.environ['GITHUB_ACTOR']
 workflow_name = os.environ['WORKFLOW_NAME'] # pull request workflow
 job_name    = os.environ['JOB_NAME']
@@ -29,6 +29,11 @@ step_name   = os.environ['STEP_NAME'] # The step name that contains the secrets 
 trigger_string = os.environ['TRIGGER_STRING'] # The trigger string
 log_zip     = os.environ['LOG_ZIP']
 git_repo    = os.environ['GITHUB_REPO']
+pull_label  = os.environ['GITHUB_PULL_LABEL'] # What label you would like to apply to the pull on retry
+# Set to TRUE if you want to add a comment on the pull
+pull_comment = os.environ['GITHUB_ENABLE_COMMENT'].lower() in [1, '1', 'true'] 
+# Set to true if you want the function to run but NOT trigger the rerun
+dry_run     = os.environ['DRY_RUN'].lower() in [1, '1', 'true']
 
 def get_logs(url, m):
     headers = {
@@ -95,7 +100,16 @@ def setup_logger():
             root.removeHandler(handler)
     logging.basicConfig(level=logging.INFO, format='%(message)s')
 
-def process_run(workflow, run, m):
+def notify_pulls(repo, pulls, workflow):
+    for pull in pulls:
+        if pull_label:
+            pull.add_to_labels(pull_label)
+        if pull_comment:
+            issue = repo.get_issue(pull.number)
+            issue.create_comment("Retry requested on workflow " + workflow.name + " due to missing secrets.")
+
+
+def process_run(repo, workflow, run, m):
     logging.info(m( msg="Failed run found", 
                     commit_title=run.head_commit.message.split('\n')[0],
                     workflow_id=workflow.id,
@@ -115,8 +129,14 @@ def process_run(workflow, run, m):
         logging.info(m(msg='Rerunning workflow',
                     workflow_id=workflow.id,
                     workflow_name=workflow.name))
-        result = run.rerun()
+        if dry_run:
+            logging.info(m(msg='This is a dry run, no retry will be triggered, ' + 
+                            'but comments and labels will be added, if configured.'))
+            result = True
+        else:
+            result = run.rerun()
         if result:
+            notify_pulls(repo, run.pull_requests, workflow)
             return "Successful retry of workflow"
     else:
         return "No trigger string found in logs"
@@ -157,9 +177,14 @@ def lambda_handler(event=None, context=None):
     for run in workflow.get_runs(actor=actor):
         if run.conclusion == 'failure':
             try:
-                message = process_run(workflow, run, m)
+                message = process_run(repo, workflow, run, m)
                 return response(200, message)
-            except:
+            except Exception as e:
+                e_type, e_object, e_trace = sys.exc_info()
+                filename = e_trace.tb_frame.f_code.co_filename
+                line_number = e_trace.tb_lineno
+                logging.error(m(msg="Exception", type=str(e_type), file=filename, line=line_number))
+
                 return response(500, "Unexpected error in run processing. Check logs.")
     return response(200, "No matching failed runs found.")
     
