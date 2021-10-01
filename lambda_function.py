@@ -43,9 +43,8 @@ def get_logs(url, m):
         'Accept': 'application/vnd.github.v3+json',
     }
     auth = ('', token)
-    # to get content after redirection
+    # This call redirects to another URL to download the content
     r = requests.get(url, headers=headers, auth=auth, allow_redirects=True)
-    logs_url = r.url  # 'https://media.readthedocs.org/pdf/django/latest/django.pdf'
     if r.status_code != 200:
         logging.error(m(msg='Failed to download log',
                       log_url=url, status=r.status_code))
@@ -131,7 +130,6 @@ def process_run(repo, workflow, run, m):
                    commit_sha=run.head_sha[0:7],
                    run_created_at=str(run.created_at))
                  )
-    message = run.head_commit.message
 
     # Download the run logs
     get_logs(run.logs_url, m)
@@ -164,7 +162,7 @@ def response(code, msg):
 def lambda_handler(event=None, context=None):
     # Create a github object using an access token
     g = Github(token)
-    m = StructuredLogMessage   # to improve readability
+    m = StructuredLogMessage   # Shortening function name to improve readability
     setup_logger()
 
     # Access a specific repo
@@ -193,6 +191,7 @@ def lambda_handler(event=None, context=None):
             try:
                 message = process_run(repo, workflow, run, m)
                 return response(200, message)
+
             except Exception as e:
                 e_type, e_object, e_trace = sys.exc_info()
                 filename = e_trace.tb_frame.f_code.co_filename
